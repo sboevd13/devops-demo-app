@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="DevOps Demo App. Проверка работы ci/cd pipline",
+    title="DevOps Demo App",
     lifespan=lifespan,
 )
 
