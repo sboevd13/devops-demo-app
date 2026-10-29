@@ -60,7 +60,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: pytest -v
+        run: python -m pytest -v
 
       - name: Validate Docker Compose
         env:
