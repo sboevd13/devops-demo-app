@@ -8,11 +8,21 @@
     mode: "0755"
   loop:
     - "{{ stack_dir }}"
-    - "{{ stack_dir }}/app"
     - "{{ stack_dir }}/nginx"
     - "{{ stack_dir }}/nginx/certs"
     - "{{ stack_dir }}/scripts"
     - "{{ stack_dir }}/backups"
+
+
+- name: Remove obsolete local build files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ stack_dir }}/app"
+    - "{{ stack_dir }}/Dockerfile"
+    - "{{ stack_dir }}/.dockerignore"
+    - "{{ stack_dir }}/requirements.txt"
 
 
 - name: Copy Compose configuration
@@ -22,46 +32,6 @@
     owner: "{{ stack_user }}"
     group: "{{ stack_group }}"
     mode: "0644"
-  notify: Deploy application stack
-
-
-- name: Copy Dockerfile
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../Dockerfile"
-    dest: "{{ stack_dir }}/Dockerfile"
-    owner: "{{ stack_user }}"
-    group: "{{ stack_group }}"
-    mode: "0644"
-  notify: Deploy application stack
-
-
-- name: Copy Docker ignore file
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../.dockerignore"
-    dest: "{{ stack_dir }}/.dockerignore"
-    owner: "{{ stack_user }}"
-    group: "{{ stack_group }}"
-    mode: "0644"
-  notify: Deploy application stack
-
-
-- name: Copy Python requirements
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../requirements.txt"
-    dest: "{{ stack_dir }}/requirements.txt"
-    owner: "{{ stack_user }}"
-    group: "{{ stack_group }}"
-    mode: "0644"
-  notify: Deploy application stack
-
-
-- name: Copy application source
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../app/"
-    dest: "{{ stack_dir }}/app/"
-    owner: "{{ stack_user }}"
-    group: "{{ stack_group }}"
-    mode: preserve
   notify: Deploy application stack
 
 
@@ -94,6 +64,7 @@
       POSTGRES_USER={{ postgres_user }}
       POSTGRES_DB={{ postgres_db }}
       POSTGRES_PASSWORD={{ postgres_password }}
+      APP_IMAGE={{ app_image_repository }}:{{ app_image_tag }}
   no_log: true
   notify: Deploy application stack
 
@@ -137,6 +108,21 @@
     mode: "0644"
 
 
+- name: Log in to GitHub Container Registry
+  ansible.builtin.command:
+    argv:
+      - docker
+      - login
+      - ghcr.io
+      - -u
+      - "{{ ghcr_username }}"
+      - --password-stdin
+    stdin: "{{ ghcr_token }}"
+  when: ghcr_token | length > 0
+  changed_when: false
+  no_log: true
+
+
 - name: Apply application deployment handlers
   ansible.builtin.meta: flush_handlers
 
@@ -146,7 +132,6 @@
     project_src: "{{ stack_dir }}"
     project_name: devops-demo-app
     state: present
-    build: policy
     pull: missing
     remove_orphans: true
     wait: true
@@ -185,3 +170,14 @@
     status_code: 200
     headers:
       Host: "{{ app_domain }}"
+
+
+- name: Log out from GitHub Container Registry
+  ansible.builtin.command:
+    argv:
+      - docker
+      - logout
+      - ghcr.io
+  when: ghcr_token | length > 0
+  changed_when: false
+  no_log: true

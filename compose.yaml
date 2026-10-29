@@ -27,10 +27,7 @@ services:
 
 
   app:
-    build:
-      context: .
-
-    image: devops-demo-app:local
+    image: ${APP_IMAGE}
     restart: unless-stopped
 
     environment:

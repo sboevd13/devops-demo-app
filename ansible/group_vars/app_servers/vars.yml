@@ -8,3 +8,9 @@ postgres_user: app
 postgres_db: appdb
 
 postgres_password: "{{ vault_postgres_password }}"
+
+app_image_repository: ghcr.io/sboevd13/devops-demo-app
+app_image_tag: latest
+
+ghcr_username: "{{ lookup('ansible.builtin.env', 'GHCR_USERNAME') | default('', true) }}"
+ghcr_token: "{{ lookup('ansible.builtin.env', 'GHCR_TOKEN') | default('', true) }}"

@@ -1,0 +1,191 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: sboevd13/devops-demo-app
+
+
+jobs:
+
+  test:
+    name: Test application
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: appdb
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U app -d appdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://app:ci-password@127.0.0.1:5432/appdb
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -v
+
+      - name: Validate Docker Compose
+        env:
+          POSTGRES_USER: app
+          POSTGRES_DB: appdb
+          POSTGRES_PASSWORD: test-password
+          APP_IMAGE: ghcr.io/sboevd13/devops-demo-app:test
+        run: |
+          docker compose config >/dev/null
+
+
+  build:
+    name: Build and publish image
+    needs: test
+
+    if: github.event_name != 'pull_request'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+
+  deploy:
+    name: Deploy to virtual machines
+    needs: build
+
+    if: >
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
+
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Ansible collections
+        working-directory: ansible
+        run: |
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Prepare Ansible password files
+        shell: bash
+        env:
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          APP1_BECOME_PASSWORD: ${{ secrets.APP1_BECOME_PASSWORD }}
+          APP2_BECOME_PASSWORD: ${{ secrets.APP2_BECOME_PASSWORD }}
+        run: |
+          umask 077
+
+          printf '%s\n' "$VAULT_PASSWORD" \
+            > "$RUNNER_TEMP/vault-pass"
+
+          printf '%s\n' "$APP1_BECOME_PASSWORD" \
+            > "$RUNNER_TEMP/app1-become-pass"
+
+          printf '%s\n' "$APP2_BECOME_PASSWORD" \
+            > "$RUNNER_TEMP/app2-become-pass"
+
+      - name: Deploy app-1
+        working-directory: ansible
+
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        run: |
+          ansible-playbook site.yml \
+            --limit app-1 \
+            --vault-password-file "$RUNNER_TEMP/vault-pass" \
+            --become-password-file "$RUNNER_TEMP/app1-become-pass" \
+            -e "app_image_tag=$GITHUB_SHA"
+
+      - name: Deploy app-2
+        working-directory: ansible
+
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        run: |
+          ansible-playbook site.yml \
+            --limit app-2 \
+            --vault-password-file "$RUNNER_TEMP/vault-pass" \
+            --become-password-file "$RUNNER_TEMP/app2-become-pass" \
+            -e "app_image_tag=$GITHUB_SHA"
+
+      - name: Remove password files
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/vault-pass"
+          rm -f "$RUNNER_TEMP/app1-become-pass"
+          rm -f "$RUNNER_TEMP/app2-become-pass"
