@@ -1,0 +1,11 @@
+---
+- name: Configure and deploy DevOps Demo App
+  hosts: app_servers
+  become: true
+
+  roles:
+    - common
+    - ssh_hardening
+    - docker
+    - firewall
+    - app

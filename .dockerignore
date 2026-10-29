@@ -1,0 +1,8 @@
+.git
+.gitignore
+ansible
+backups
+__pycache__
+*.pyc
+.env
+README.md

@@ -1,0 +1,41 @@
+---
+- name: Allow SSH
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+  notify: Restart Docker
+
+- name: Allow HTTP
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+  notify: Restart Docker
+
+- name: Allow HTTPS
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+  notify: Restart Docker
+
+- name: Deny incoming traffic by default
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+  notify: Restart Docker
+
+- name: Allow outgoing traffic by default
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+  notify: Restart Docker
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  notify: Restart Docker
+
+- name: Apply firewall handlers now
+  ansible.builtin.meta: flush_handlers

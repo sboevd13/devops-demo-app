@@ -1,0 +1,10 @@
+---
+stack_dir: /opt/devops-demo-app
+
+stack_user: dmitriy
+stack_group: dmitriy
+
+postgres_user: app
+postgres_db: appdb
+
+postgres_password: "{{ vault_postgres_password }}"

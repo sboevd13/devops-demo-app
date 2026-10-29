@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>DevOps Demo App</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 700px;
+            margin: 60px auto;
+            padding: 0 20px;
+        }
+
+        input {
+            padding: 10px;
+            width: 300px;
+        }
+
+        button, .button {
+            padding: 10px 16px;
+            margin-left: 5px;
+            text-decoration: none;
+            border: 1px solid #333;
+            background: #eee;
+            color: #000;
+            cursor: pointer;
+        }
+
+        .actions {
+            margin-top: 25px;
+        }
+
+        .error {
+            color: #b00020;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>DevOps Demo App</h1>
+
+<p>Введите имя пользователя и сохраните его в PostgreSQL.</p>
+
+{% if error %}
+<p class="error">Введите корректное имя длиной до 100 символов.</p>
+{% endif %}
+
+<form method="post" action="/users">
+    <input
+        type="text"
+        name="name"
+        maxlength="100"
+        placeholder="Имя пользователя"
+        required
+    >
+
+    <button type="submit">
+        Сохранить
+    </button>
+</form>
+
+<div class="actions">
+    <a class="button" href="/users">
+        Показать всех пользователей
+    </a>
+</div>
+
+</body>
+</html>

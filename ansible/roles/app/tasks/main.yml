@@ -1,0 +1,187 @@
+---
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0755"
+  loop:
+    - "{{ stack_dir }}"
+    - "{{ stack_dir }}/app"
+    - "{{ stack_dir }}/nginx"
+    - "{{ stack_dir }}/nginx/certs"
+    - "{{ stack_dir }}/scripts"
+    - "{{ stack_dir }}/backups"
+
+
+- name: Copy Compose configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../compose.yaml"
+    dest: "{{ stack_dir }}/compose.yaml"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Deploy application stack
+
+
+- name: Copy Dockerfile
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../Dockerfile"
+    dest: "{{ stack_dir }}/Dockerfile"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Deploy application stack
+
+
+- name: Copy Docker ignore file
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../.dockerignore"
+    dest: "{{ stack_dir }}/.dockerignore"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Deploy application stack
+
+
+- name: Copy Python requirements
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../requirements.txt"
+    dest: "{{ stack_dir }}/requirements.txt"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Deploy application stack
+
+
+- name: Copy application source
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../app/"
+    dest: "{{ stack_dir }}/app/"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: preserve
+  notify: Deploy application stack
+
+
+- name: Copy backup script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/backup.sh"
+    dest: "{{ stack_dir }}/scripts/backup.sh"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0755"
+
+
+- name: Create Nginx configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ stack_dir }}/nginx/nginx.conf"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Deploy application stack
+
+
+- name: Create application environment file
+  ansible.builtin.copy:
+    dest: "{{ stack_dir }}/.env"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0600"
+    content: |
+      POSTGRES_USER={{ postgres_user }}
+      POSTGRES_DB={{ postgres_db }}
+      POSTGRES_PASSWORD={{ postgres_password }}
+  no_log: true
+  notify: Deploy application stack
+
+
+- name: Generate self-signed TLS certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -nodes
+      - -newkey
+      - rsa:2048
+      - -days
+      - "365"
+      - -keyout
+      - "{{ stack_dir }}/nginx/certs/app.key"
+      - -out
+      - "{{ stack_dir }}/nginx/certs/app.crt"
+      - -subj
+      - "/CN={{ app_domain }}"
+      - -addext
+      - "subjectAltName=DNS:{{ app_domain }},IP:{{ ansible_host }}"
+    creates: "{{ stack_dir }}/nginx/certs/app.crt"
+  notify: Deploy application stack
+
+
+- name: Protect TLS private key
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/nginx/certs/app.key"
+    owner: root
+    group: root
+    mode: "0600"
+
+
+- name: Set TLS certificate permissions
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/nginx/certs/app.crt"
+    owner: root
+    group: root
+    mode: "0644"
+
+
+- name: Apply application deployment handlers
+  ansible.builtin.meta: flush_handlers
+
+
+- name: Ensure application stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ stack_dir }}"
+    project_name: devops-demo-app
+    state: present
+    build: policy
+    pull: missing
+    remove_orphans: true
+    wait: true
+    wait_timeout: 120
+
+
+- name: Wait for HTTP
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 80
+    state: started
+    timeout: 60
+
+
+- name: Wait for HTTPS
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 443
+    state: started
+    timeout: 60
+
+
+- name: Check HTTP redirect
+  ansible.builtin.uri:
+    url: http://127.0.0.1/
+    follow_redirects: none
+    status_code: 301
+    headers:
+      Host: "{{ app_domain }}"
+
+
+- name: Check application health over HTTPS
+  ansible.builtin.uri:
+    url: https://127.0.0.1/health
+    validate_certs: false
+    status_code: 200
+    headers:
+      Host: "{{ app_domain }}"

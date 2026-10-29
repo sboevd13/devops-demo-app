@@ -1,0 +1,12 @@
+---
+- name: Deploy application stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ stack_dir }}"
+    project_name: devops-demo-app
+    state: present
+    build: always
+    pull: missing
+    remove_orphans: true
+    wait: true
+    wait_timeout: 120
+    ignore_build_events: true
