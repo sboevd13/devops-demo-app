@@ -15,19 +15,7 @@ BACKUP_DIR="$PROJECT_DIR/backups/$DATE"
 
 mkdir -p "$BACKUP_DIR"
 
-echo "[1/5] Stopping application writes..."
-
-docker compose stop nginx app
-
-cleanup() {
-    echo "Starting application..."
-    docker compose start app nginx >/dev/null
-}
-
-trap cleanup EXIT
-
-
-echo "[2/5] Creating PostgreSQL dump..."
+echo "[1/4] Creating PostgreSQL dump..."
 
 docker compose exec -T db \
     pg_dump \
@@ -36,13 +24,13 @@ docker compose exec -T db \
     | gzip > "$BACKUP_DIR/database.sql.gz"
 
 
-echo "[3/5] Saving configuration..."
+echo "[2/4] Saving configuration..."
 
 cp compose.yaml "$BACKUP_DIR/"
 cp nginx/nginx.conf "$BACKUP_DIR/"
 
 
-echo "[4/5] Creating checksums..."
+echo "[3/4] Creating checksums..."
 
 cd "$BACKUP_DIR"
 
@@ -53,7 +41,7 @@ sha256sum \
     > SHA256SUMS
 
 
-echo "[5/5] Verifying checksums..."
+echo "[4/4] Verifying checksums..."
 
 sha256sum -c SHA256SUMS
 
