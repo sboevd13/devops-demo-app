@@ -1,5 +1,5 @@
 ---
-- name: Configure and deploy DevOps Demo App
+- name: Configure and deploy application servers
   hosts: app_servers
   become: true
 
@@ -9,3 +9,12 @@
     - docker
     - firewall
     - app
+    - monitoring_agent
+
+
+- name: Configure monitoring server
+  hosts: monitoring_servers
+  become: true
+
+  roles:
+    - monitoring_server

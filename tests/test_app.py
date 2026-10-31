@@ -27,3 +27,12 @@ def test_user_can_be_saved_and_listed():
 
         assert response.status_code == 200
         assert test_name in response.text
+
+
+def test_metrics_endpoint():
+    with TestClient(app) as client:
+        client.get("/health")
+        response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "http_requests_total" in response.text

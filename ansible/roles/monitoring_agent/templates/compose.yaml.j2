@@ -1,0 +1,33 @@
+services:
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.12.1
+    restart: unless-stopped
+
+    command:
+      - --path.rootfs=/host
+
+    pid: host
+
+    volumes:
+      - /:/host:ro,rslave
+
+    ports:
+      - "{{ ansible_host }}:9100:9100"
+
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    restart: unless-stopped
+
+    privileged: true
+
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+
+    ports:
+      - "{{ ansible_host }}:8080:8080"

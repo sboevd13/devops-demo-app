@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import create_engine, text
 
 
@@ -44,6 +45,16 @@ app = FastAPI(
     title="DevOps Demo App",
     lifespan=lifespan,
 )
+
+
+Instrumentator(
+    excluded_handlers=["/metrics"],
+).instrument(app).expose(
+    app,
+    endpoint="/metrics",
+    include_in_schema=False,
+)
+
 
 templates = Jinja2Templates(
     directory=str(Path(__file__).parent / "templates")

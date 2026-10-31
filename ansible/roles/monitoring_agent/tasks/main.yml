@@ -1,0 +1,40 @@
+---
+- name: Create monitoring agent directory
+  ansible.builtin.file:
+    path: "{{ monitoring_agent_dir }}"
+    state: directory
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0755"
+
+
+- name: Create monitoring agent Compose configuration
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ monitoring_agent_dir }}/compose.yaml"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+
+
+- name: Deploy monitoring agents
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_agent_dir }}"
+    project_name: monitoring-agent
+    state: present
+    pull: missing
+    remove_orphans: true
+    wait: true
+    wait_timeout: 120
+
+
+- name: Check node_exporter
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:9100/metrics"
+    status_code: 200
+
+
+- name: Check cAdvisor
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:8080/metrics"
+    status_code: 200

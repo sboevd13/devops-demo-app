@@ -14,3 +14,10 @@ app_image_tag: latest
 
 ghcr_username: "{{ lookup('ansible.builtin.env', 'GHCR_USERNAME') | default('', true) }}"
 ghcr_token: "{{ lookup('ansible.builtin.env', 'GHCR_TOKEN') | default('', true) }}"
+
+monitoring_agent_dir: /opt/monitoring-agent
+monitoring_dir: /opt/monitoring
+
+monitoring_allowed_subnet: 192.168.175.0/24
+
+grafana_admin_password: "{{ vault_grafana_admin_password }}"

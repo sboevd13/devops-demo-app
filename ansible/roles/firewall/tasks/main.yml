@@ -6,12 +6,14 @@
     proto: tcp
   notify: Restart Docker
 
+
 - name: Allow HTTP
   community.general.ufw:
     rule: allow
     port: "80"
     proto: tcp
   notify: Restart Docker
+
 
 - name: Allow HTTPS
   community.general.ufw:
@@ -20,11 +22,51 @@
     proto: tcp
   notify: Restart Docker
 
+
+- name: Allow node_exporter from monitoring server
+  community.general.ufw:
+    rule: allow
+    src: "{{ hostvars[groups['monitoring_servers'][0]].ansible_host }}"
+    port: "9100"
+    proto: tcp
+  notify: Restart Docker
+
+
+- name: Allow cAdvisor from monitoring server
+  community.general.ufw:
+    rule: allow
+    src: "{{ hostvars[groups['monitoring_servers'][0]].ansible_host }}"
+    port: "8080"
+    proto: tcp
+  notify: Restart Docker
+
+
+- name: Allow Grafana from homelab network
+  community.general.ufw:
+    rule: allow
+    src: "{{ monitoring_allowed_subnet }}"
+    port: "3000"
+    proto: tcp
+  when: inventory_hostname in groups["monitoring_servers"]
+  notify: Restart Docker
+
+
+- name: Allow Prometheus from homelab network
+  community.general.ufw:
+    rule: allow
+    src: "{{ monitoring_allowed_subnet }}"
+    port: "9090"
+    proto: tcp
+  when: inventory_hostname in groups["monitoring_servers"]
+  notify: Restart Docker
+
+
 - name: Deny incoming traffic by default
   community.general.ufw:
     direction: incoming
     policy: deny
   notify: Restart Docker
+
 
 - name: Allow outgoing traffic by default
   community.general.ufw:
@@ -32,10 +74,12 @@
     policy: allow
   notify: Restart Docker
 
+
 - name: Enable UFW
   community.general.ufw:
     state: enabled
   notify: Restart Docker
+
 
 - name: Apply firewall handlers now
   ansible.builtin.meta: flush_handlers

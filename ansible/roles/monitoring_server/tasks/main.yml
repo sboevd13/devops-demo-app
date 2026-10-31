@@ -1,0 +1,115 @@
+---
+- name: Create monitoring directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0755"
+  loop:
+    - "{{ monitoring_dir }}"
+    - "{{ monitoring_dir }}/prometheus"
+    - "{{ monitoring_dir }}/grafana"
+    - "{{ monitoring_dir }}/grafana/provisioning"
+    - "{{ monitoring_dir }}/grafana/provisioning/datasources"
+    - "{{ monitoring_dir }}/grafana/provisioning/dashboards"
+    - "{{ monitoring_dir }}/grafana/dashboards"
+
+
+- name: Create monitoring Compose configuration
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ monitoring_dir }}/compose.yaml"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Restart monitoring stack
+
+
+- name: Create Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ monitoring_dir }}/prometheus/prometheus.yml"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Restart monitoring stack
+
+
+- name: Copy Prometheus alert rules
+  ansible.builtin.copy:
+    src: alerts.yml
+    dest: "{{ monitoring_dir }}/prometheus/alerts.yml"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Restart monitoring stack
+
+
+- name: Copy Grafana datasource provisioning
+  ansible.builtin.copy:
+    src: datasource.yml
+    dest: "{{ monitoring_dir }}/grafana/provisioning/datasources/prometheus.yml"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Restart monitoring stack
+
+
+- name: Copy Grafana dashboard provisioning
+  ansible.builtin.copy:
+    src: dashboards.yml
+    dest: "{{ monitoring_dir }}/grafana/provisioning/dashboards/dashboards.yml"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Restart monitoring stack
+
+
+- name: Copy Grafana dashboard
+  ansible.builtin.copy:
+    src: devops-demo.json
+    dest: "{{ monitoring_dir }}/grafana/dashboards/devops-demo.json"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  notify: Restart monitoring stack
+
+
+- name: Create monitoring environment file
+  ansible.builtin.copy:
+    dest: "{{ monitoring_dir }}/.env"
+    owner: "{{ stack_user }}"
+    group: "{{ stack_group }}"
+    mode: "0600"
+    content: |
+      GRAFANA_ADMIN_PASSWORD={{ grafana_admin_password }}
+  no_log: true
+  notify: Restart monitoring stack
+
+
+- name: Deploy monitoring stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    project_name: monitoring
+    state: present
+    pull: missing
+    remove_orphans: true
+    wait: true
+    wait_timeout: 120
+
+
+- name: Apply monitoring restart handlers
+  ansible.builtin.meta: flush_handlers
+
+
+- name: Check Prometheus
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:9090/-/ready"
+    status_code: 200
+
+
+- name: Check Grafana
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:3000/api/health"
+    status_code: 200
