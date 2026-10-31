@@ -95,21 +95,43 @@
     state: present
     pull: missing
     remove_orphans: true
-    wait: true
-    wait_timeout: 120
 
 
 - name: Apply monitoring restart handlers
   ansible.builtin.meta: flush_handlers
 
 
+- name: Wait for Prometheus port
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 9090
+    state: started
+    timeout: 60
+
+
+- name: Wait for Grafana port
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 3000
+    state: started
+    timeout: 120
+
+
 - name: Check Prometheus
   ansible.builtin.uri:
     url: "http://{{ ansible_host }}:9090/-/ready"
     status_code: 200
+  register: prometheus_health
+  retries: 30
+  delay: 2
+  until: prometheus_health.status == 200
 
 
 - name: Check Grafana
   ansible.builtin.uri:
     url: "http://{{ ansible_host }}:3000/api/health"
     status_code: 200
+  register: grafana_health
+  retries: 30
+  delay: 2
+  until: grafana_health.status == 200
