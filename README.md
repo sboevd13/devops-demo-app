@@ -1,5 +1,10 @@
 # DevOps Demo App
 
+**Kubernetes migration:** see [kubernetes/README.md](kubernetes/README.md) for
+the two-node k3s deployment, monitoring, backups, recovery test, and CI/CD.
+The configuration below describes the previous Docker Compose deployment,
+retained for rollback. Do not run `ansible/site.yml` after switching to k3s.
+
 Учебный DevOps-проект вокруг простого FastAPI-приложения с PostgreSQL.
 
 Приложение намеренно минимальное: пользователь может сохранить имя в базу и посмотреть список пользователей. Основной фокус проекта — инфраструктура, автоматизация, CI/CD, backup и disaster recovery.

@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+rule_files:
+  - /etc/prometheus/alerts.yml
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+  - job_name: node
+    static_configs:
+      - targets: [192.168.175.130:9100]
+        labels: {server: app-1}
+      - targets: [192.168.175.133:9100]
+        labels: {server: app-2}
+  - job_name: cadvisor
+    static_configs:
+      - targets: [192.168.175.130:8080]
+        labels: {server: app-1}
+      - targets: [192.168.175.133:8080]
+        labels: {server: app-2}
+  - job_name: fastapi
+    metrics_path: /metrics
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [devops-demo]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: devops-demo-app
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        regex: app
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_number]
+        regex: "8000"
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: server

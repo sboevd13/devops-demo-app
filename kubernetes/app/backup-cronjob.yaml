@@ -1,0 +1,66 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: devops-demo
+spec:
+  schedule: "0 3 * * *"
+  timeZone: Asia/Yekaterinburg
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: app-1
+          restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          containers:
+            - name: backup
+              image: postgres:18.6-bookworm
+              command:
+                - bash
+                - -euo
+                - pipefail
+                - -c
+                - |
+                  umask 077
+                  stamp=$(date +%Y-%m-%d_%H-%M-%S)
+                  tmp="/backups/${stamp}.sql.gz.tmp"
+                  trap 'rm -f "$tmp"' EXIT
+                  pg_dump --clean --if-exists -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > "$tmp"
+                  test -s "$tmp"
+                  gzip -t "$tmp"
+                  mv "$tmp" "/backups/${stamp}.sql.gz"
+                  (cd /backups && sha256sum "${stamp}.sql.gz" > "${stamp}.sha256")
+                  find /backups -type f \( -name '*.sql.gz' -o -name '*.sha256' \) -mtime +14 -delete
+                  echo "Backup saved: /backups/${stamp}.sql.gz"
+              env:
+                - name: POSTGRES_USER
+                  valueFrom:
+                    configMapKeyRef:
+                      name: app-config
+                      key: POSTGRES_USER
+                - name: POSTGRES_DB
+                  valueFrom:
+                    configMapKeyRef:
+                      name: app-config
+                      key: POSTGRES_DB
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: app-secrets
+                      key: POSTGRES_PASSWORD
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              hostPath:
+                path: /opt/devops-demo-app/k8s-backups
+                type: DirectoryOrCreate

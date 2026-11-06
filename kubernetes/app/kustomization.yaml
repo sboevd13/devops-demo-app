@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - postgres-service.yaml
+  - postgres-statefulset.yaml
+  - app-service.yaml
+  - app-deployment.yaml
+  - nginx-configmap.yaml
+  - nginx-service.yaml
+  - nginx-deployment.yaml
+  - backup-cronjob.yaml
+images:
+  - name: ghcr.io/sboevd13/devops-demo-app
+    newTag: latest
