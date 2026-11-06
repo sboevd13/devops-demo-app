@@ -56,6 +56,7 @@ spec:
         app: cadvisor
     spec:
       hostNetwork: true
+      automountServiceAccountToken: false
       containers:
         - name: cadvisor
           image: ghcr.io/google/cadvisor:v0.60.6
