@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-demo-app
+  namespace: devops-demo
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: devops-demo-app
+
+  template:
+    metadata:
+      labels:
+        app: devops-demo-app
+
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:18.6-bookworm
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U app -d appdb; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+
+      containers:
+        - name: app
+          image: ghcr.io/sboevd13/devops-demo-app:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8000
+
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: DATABASE_URL
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
