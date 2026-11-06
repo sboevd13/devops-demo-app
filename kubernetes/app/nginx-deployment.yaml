@@ -5,7 +5,7 @@ metadata:
   namespace: devops-demo
 
 spec:
-  replicas: 1
+  replicas: 2
 
   selector:
     matchLabels:
@@ -17,6 +17,13 @@ spec:
         app: nginx
 
     spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: nginx
       initContainers:
         - name: wait-for-fastapi
           image: busybox:1.36
@@ -35,11 +42,15 @@ spec:
 
           ports:
             - containerPort: 80
+              name: http
+            - containerPort: 443
+              name: https
 
           readinessProbe:
             httpGet:
               path: /health
-              port: 80
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 2
             periodSeconds: 5
             timeoutSeconds: 3
@@ -57,8 +68,14 @@ spec:
             - name: nginx-config
               mountPath: /etc/nginx/conf.d/default.conf
               subPath: default.conf
+            - name: tls
+              mountPath: /etc/nginx/certs
+              readOnly: true
 
       volumes:
         - name: nginx-config
           configMap:
             name: nginx-config
+        - name: tls
+          secret:
+            secretName: nginx-tls

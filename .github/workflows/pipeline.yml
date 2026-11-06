@@ -111,7 +111,7 @@ jobs:
 
 
   deploy:
-    name: Deploy to virtual machines
+    name: Deploy to Kubernetes
     needs: build
 
     if: >
@@ -125,67 +125,28 @@ jobs:
 
     permissions:
       contents: read
-      packages: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install Ansible collections
-        working-directory: ansible
+      - name: Check cluster access
+        run: kubectl get nodes
+
+      - name: Apply manifests with immutable image tag
         run: |
-          ansible-galaxy collection install -r requirements.yml
+          cp -R kubernetes/app "$RUNNER_TEMP/app-manifests"
+          sed -i "s/newTag: latest/newTag: $GITHUB_SHA/" "$RUNNER_TEMP/app-manifests/kustomization.yaml"
+          kubectl apply -k "$RUNNER_TEMP/app-manifests"
+          kubectl apply -k kubernetes/monitoring
+          kubectl -n devops-demo rollout restart deployment/nginx
 
-      - name: Prepare Ansible password files
-        shell: bash
-        env:
-          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
-          APP1_BECOME_PASSWORD: ${{ secrets.APP1_BECOME_PASSWORD }}
-          APP2_BECOME_PASSWORD: ${{ secrets.APP2_BECOME_PASSWORD }}
+      - name: Wait for PostgreSQL and application
         run: |
-          umask 077
-
-          printf '%s\n' "$VAULT_PASSWORD" \
-            > "$RUNNER_TEMP/vault-pass"
-
-          printf '%s\n' "$APP1_BECOME_PASSWORD" \
-            > "$RUNNER_TEMP/app1-become-pass"
-
-          printf '%s\n' "$APP2_BECOME_PASSWORD" \
-            > "$RUNNER_TEMP/app2-become-pass"
-
-      - name: Deploy app-1
-        working-directory: ansible
-
-        env:
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-        run: |
-          ansible-playbook site.yml \
-            --limit app-1 \
-            --vault-password-file "$RUNNER_TEMP/vault-pass" \
-            --become-password-file "$RUNNER_TEMP/app1-become-pass" \
-            -e "app_image_tag=$GITHUB_SHA"
-
-      - name: Deploy app-2
-        working-directory: ansible
-
-        env:
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-        run: |
-          ansible-playbook site.yml \
-            --limit app-2 \
-            --vault-password-file "$RUNNER_TEMP/vault-pass" \
-            --become-password-file "$RUNNER_TEMP/app2-become-pass" \
-            -e "app_image_tag=$GITHUB_SHA"
-
-      - name: Remove password files
-        if: always()
-        shell: bash
-        run: |
-          rm -f "$RUNNER_TEMP/vault-pass"
-          rm -f "$RUNNER_TEMP/app1-become-pass"
-          rm -f "$RUNNER_TEMP/app2-become-pass"
+          kubectl -n devops-demo rollout status statefulset/postgres --timeout=300s
+          kubectl -n devops-demo rollout status deployment/devops-demo-app --timeout=180s
+          kubectl -n devops-demo rollout status deployment/nginx --timeout=180s
+          kubectl -n monitoring rollout status daemonset/node-exporter --timeout=180s
+          kubectl -n monitoring rollout status daemonset/cadvisor --timeout=180s
+          kubectl -n monitoring rollout status deployment/prometheus --timeout=180s
+          kubectl -n monitoring rollout status deployment/grafana --timeout=180s
