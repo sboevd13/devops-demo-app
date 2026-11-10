@@ -1,20 +1,68 @@
 ---
-- name: Configure and deploy application servers
-  hosts: app_servers
+- name: Prepare all Ubuntu nodes
+  hosts: k3s_cluster
   become: true
-
   roles:
     - common
-    - ssh_hardening
-    - docker
-    - firewall
-    - app
-    - monitoring_agent
 
-
-- name: Configure monitoring server
-  hosts: monitoring_servers
+- name: Install K3s control plane
+  hosts: k3s_server
   become: true
-
   roles:
-    - monitoring_server
+    - k3s_server
+
+- name: Join K3s workers
+  hosts: k3s_agents
+  become: true
+  roles:
+    - k3s_agent
+
+- name: Verify cluster and save kubeconfig to WSL
+  hosts: k3s_server
+  become: true
+  tasks:
+    - name: Wait for both nodes to register
+      ansible.builtin.command: "/usr/local/bin/k3s kubectl get node {{ item }}"
+      loop: "{{ groups['k3s_cluster'] }}"
+      register: k3s_node_result
+      until: k3s_node_result.rc == 0
+      retries: 36
+      delay: 5
+      changed_when: false
+
+    - name: Wait for both nodes to become Ready
+      ansible.builtin.command: >-
+        /usr/local/bin/k3s kubectl wait
+        --for=condition=Ready node/{{ item }} --timeout=180s
+      loop: "{{ groups['k3s_cluster'] }}"
+      changed_when: false
+
+    - name: Read admin kubeconfig from app-1
+      ansible.builtin.slurp:
+        src: /etc/rancher/k3s/k3s.yaml
+      register: remote_kubeconfig
+      no_log: true
+
+    - name: Create local directory for kubeconfig
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.generated"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: Save kubeconfig locally with the reachable API address
+      ansible.builtin.copy:
+        content: >-
+          {{ (remote_kubeconfig.content | b64decode) |
+             replace('https://127.0.0.1:6443',
+                     'https://' ~ hostvars[groups['k3s_server'][0]].ansible_host ~ ':6443') }}
+        dest: "{{ playbook_dir }}/.generated/kubeconfig"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Show next command
+      ansible.builtin.debug:
+        msg: "Cluster is Ready. Use: export KUBECONFIG={{ playbook_dir }}/.generated/kubeconfig"

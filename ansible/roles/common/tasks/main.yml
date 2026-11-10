@@ -1,14 +1,102 @@
 ---
-- name: Update APT cache
+- name: Ensure nodes are Ubuntu with systemd
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_service_mgr == 'systemd'
+    fail_msg: "This playbook is intended for Ubuntu Server with systemd."
+
+- name: Set node hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Ensure local hostname resolves
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s+'
+    line: "127.0.1.1 {{ inventory_hostname }}"
+
+- name: Install basic system packages
   ansible.builtin.apt:
+    name:
+      - openssh-server
+      - curl
+      - ca-certificates
+      - chrony
+    state: present
     update_cache: true
     cache_valid_time: 3600
 
-- name: Install base packages
-  ansible.builtin.apt:
-    name:
-      - ca-certificates
-      - curl
-      - openssl
-      - ufw
-    state: present
+- name: Enable SSH service
+  ansible.builtin.systemd:
+    name: ssh
+    state: started
+    enabled: true
+
+- name: Enable time synchronization
+  ansible.builtin.systemd:
+    name: chrony
+    state: started
+    enabled: true
+
+- name: Create .ssh for bootstrap user
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.ssh"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0700'
+
+- name: Ensure controller public key is authorized
+  ansible.builtin.lineinfile:
+    path: "/home/{{ ansible_user }}/.ssh/authorized_keys"
+    line: "{{ lookup('file', ssh_public_key_path) }}"
+    create: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+
+- name: Configure SSH key-only login and disable root login
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/00-ansible-hardening.conf
+    content: |
+      PubkeyAuthentication yes
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+    owner: root
+    group: root
+    mode: '0644'
+  register: ssh_config
+
+- name: Validate resulting SSH configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Reload SSH after configuration change
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded
+  when: ssh_config.changed
+
+- name: Disable running swap
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb | int > 0
+
+- name: Disable swap in fstab on subsequent boots
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\s*[^#\s]\S*\s+\S+\s+swap\s+.*)$'
+    replace: '# \1'
+
+- name: Check whether UFW is active
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  changed_when: false
+  failed_when: false
+
+- name: Disable UFW in this isolated VMware lab
+  ansible.builtin.command: ufw disable
+  when:
+    - ufw_status.rc == 0
+    - "'Status: active' in ufw_status.stdout"

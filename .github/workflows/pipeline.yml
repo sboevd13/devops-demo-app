@@ -1,40 +1,36 @@
+
 name: CI/CD
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
   workflow_dispatch:
 
+permissions:
+  contents: read
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: sboevd13/devops-demo-app
 
-
 jobs:
-
   test:
-    name: Test application
+    name: Run tests
     runs-on: ubuntu-latest
 
     services:
       postgres:
         image: postgres:18-alpine
-
         env:
           POSTGRES_USER: app
           POSTGRES_PASSWORD: ci-password
           POSTGRES_DB: appdb
-
         ports:
           - 5432:5432
-
         options: >-
           --health-cmd "pg_isready -U app -d appdb"
           --health-interval 5s
@@ -62,22 +58,10 @@ jobs:
       - name: Run tests
         run: python -m pytest -v
 
-      - name: Validate Docker Compose
-        env:
-          POSTGRES_USER: app
-          POSTGRES_DB: appdb
-          POSTGRES_PASSWORD: test-password
-          APP_IMAGE: ghcr.io/sboevd13/devops-demo-app:test
-        run: |
-          docker compose config >/dev/null
-
-
   build:
-    name: Build and publish image
+    name: Build and push image
     needs: test
-
-    if: github.event_name != 'pull_request'
-
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     permissions:
@@ -98,7 +82,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push image
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -109,44 +93,36 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-
   deploy:
-    name: Deploy to Kubernetes
+    name: Deploy to K3s
     needs: build
+    runs-on: [self-hosted, linux, x64]
+    permissions: {}
 
-    if: >
-      github.event_name != 'pull_request' &&
-      github.ref == 'refs/heads/main'
-
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-
-    permissions:
-      contents: read
+    concurrency:
+      group: k3s-demo-deploy
+      cancel-in-progress: false
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Check cluster access
-        run: kubectl get nodes
-
-      - name: Apply manifests with immutable image tag
+      - name: Check Kubernetes access
         run: |
-          cp -R kubernetes/app "$RUNNER_TEMP/app-manifests"
-          sed -i "s/newTag: latest/newTag: $GITHUB_SHA/" "$RUNNER_TEMP/app-manifests/kustomization.yaml"
-          kubectl apply -k "$RUNNER_TEMP/app-manifests"
-          kubectl apply -k kubernetes/monitoring
-          kubectl -n devops-demo rollout restart deployment/nginx
+          command -v kubectl
+          test -r "$HOME/.kube/config"
+          kubectl --request-timeout=10s get nodes
 
-      - name: Wait for PostgreSQL and application
+      - name: Update FastAPI image
         run: |
-          kubectl -n devops-demo rollout status statefulset/postgres --timeout=300s
-          kubectl -n devops-demo rollout status deployment/devops-demo-app --timeout=180s
-          kubectl -n devops-demo rollout status deployment/nginx --timeout=180s
-          kubectl -n monitoring rollout status daemonset/node-exporter --timeout=180s
-          kubectl -n monitoring rollout status daemonset/cadvisor --timeout=180s
-          kubectl -n monitoring rollout status deployment/prometheus --timeout=180s
-          kubectl -n monitoring rollout status deployment/grafana --timeout=180s
+          kubectl -n devops-demo set image \
+            deployment/devops-demo-app \
+            app="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA}"
+
+      - name: Wait for rollout
+        run: |
+          kubectl -n devops-demo rollout status \
+            deployment/devops-demo-app --timeout=300s
+
+      - name: Show deployment status
+        if: always()
+        run: |
+          kubectl -n devops-demo get deployment,pods -o wide || true
+

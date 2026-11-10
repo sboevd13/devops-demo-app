@@ -1,0 +1,4 @@
+---
+k3s_channel: stable
+
+ssh_public_key_path: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519.pub"
