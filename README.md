@@ -1,314 +1,125 @@
 # DevOps Demo App
 
-**Kubernetes migration:** see [kubernetes/README.md](kubernetes/README.md) for
-the two-node k3s deployment, monitoring, backups, recovery test, and CI/CD.
-The configuration below describes the previous Docker Compose deployment,
-retained for rollback. Do not run `ansible/site.yml` after switching to k3s.
+Учебный DevOps-проект по развёртыванию и эксплуатации FastAPI-приложения с PostgreSQL в Kubernetes.
 
-Учебный DevOps-проект вокруг простого FastAPI-приложения с PostgreSQL.
+Инфраструктура состоит из двух Ubuntu Server VM. Настройка серверов и установка K3s автоматизированы через Ansible. Для мониторинга используются Prometheus и Grafana, для CI/CD — GitHub Actions.
 
-Приложение намеренно минимальное: пользователь может сохранить имя в базу и посмотреть список пользователей. Основной фокус проекта — инфраструктура, автоматизация, CI/CD, backup и disaster recovery.
+## Технологии
+
+- **Infrastructure:** Ubuntu Server, Ansible, Kubernetes (K3s)
+- **Application:** Python, FastAPI, PostgreSQL, Nginx
+- **CI/CD:** GitHub Actions, Docker, GHCR
+- **Monitoring:** Prometheus, Grafana, Node Exporter, cAdvisor
+- **Backup:** Kubernetes CronJob, pg_dump
 
 ## Архитектура
 
 ```text
-Browser
-   |
- HTTPS
-   |
- Nginx
-   |
- FastAPI
-   |
-PostgreSQL
+                   GitHub Actions
+                         |
+                        GHCR
+                         |
+                Kubernetes (K3s)
+                  /           \
+              app-1           app-2
+           Control Plane      Worker
+                  \           /
+                   Nginx (HTTPS)
+                         |
+                       FastAPI
+                         |
+                     PostgreSQL
+
+              Prometheus + Grafana
 ```
 
-Наружу доступны только:
+## Развёртывание
 
-```text
-22   SSH
-80   HTTP → HTTPS redirect
-443  HTTPS
+Кластер использует две Ubuntu Server VM:
+
+| Узел | IP-адрес | Роль |
+|---|---|---|
+| app-1 | 192.168.175.130 | Control Plane |
+| app-2 | 192.168.175.133 | Worker |
+
+Необходимы настроенный SSH-доступ к VM, Ansible и kubectl на управляющей машине.
+
+### 1. Установка K3s
+
+```bash
+cd ansible
+ansible-playbook site.yml
+cd ..
 ```
 
-FastAPI и PostgreSQL работают только внутри Docker networks.
+Подключение к кластеру:
 
-## Стек
-
-- Ubuntu Server
-- Python / FastAPI
-- PostgreSQL
-- Nginx
-- Docker / Docker Compose
-- Ansible
-- Ansible Vault
-- GitHub Actions
-- GitHub Container Registry
-- UFW
-- OpenSSH
-- Bash
-- Git
-
-## Структура проекта
-
-```text
-devops-demo-app/
-├── app/
-├── tests/
-├── scripts/
-│   ├── backup.sh
-│   └── dr-test.sh
-├── ansible/
-│   ├── site.yml
-│   ├── inventory.ini
-│   ├── group_vars/
-│   └── roles/
-│       ├── common/
-│       ├── ssh_hardening/
-│       ├── docker/
-│       ├── firewall/
-│       └── app/
-├── .github/workflows/
-│   └── pipeline.yml
-├── Dockerfile
-├── compose.yaml
-├── requirements.txt
-└── README.md
+```bash
+export KUBECONFIG="$PWD/ansible/.generated/kubeconfig"
+kubectl get nodes
 ```
 
-## Ansible
+### 2. Развёртывание приложения
 
-Ansible используется для конфигурации Ubuntu Server и развёртывания приложения на нескольких VM.
+Перед первым запуском необходимо создать Kubernetes Secrets `app-secrets` и `nginx-tls`, а также подготовить каталог бэкапов на `app-1`.
 
-Control node:
-
-```text
-WSL
+```bash
+kubectl apply -k kubernetes/app/
+kubectl -n devops-demo get pods,svc
 ```
 
-Managed nodes:
+### 3. Мониторинг
 
-```text
-app-1
-app-2
+После создания Secret `grafana-admin`:
+
+```bash
+kubectl apply -k kubernetes/monitoring/
+kubectl -n monitoring get pods,svc
 ```
 
-Playbook автоматически:
+## Доступ к сервисам
 
-- устанавливает базовые пакеты;
-- настраивает SSH hardening;
-- настраивает UFW;
-- устанавливает Docker;
-- создаёт `/opt/devops-demo-app`;
-- создаёт `.env`;
-- создаёт self-signed TLS certificate;
-- копирует конфигурацию;
-- скачивает Docker image приложения;
-- запускает Docker Compose stack;
-- выполняет health checks.
+| Сервис | Адрес |
+|---|---|
+| FastAPI | https://192.168.175.130:30443 |
+| Grafana | http://192.168.175.130:30300 |
+| Prometheus | http://192.168.175.130:30090 |
 
-Секреты хранятся в зашифрованном Ansible Vault.
+Для HTTPS используется самоподписанный сертификат.
 
 ## CI/CD
 
-Pipeline реализован через GitHub Actions.
+После push в `main` GitHub Actions:
 
-```text
-git push
-   |
-   v
-Tests
-   |
-   v
-Docker build
-   |
-   v
-GHCR
-   |
-   v
-Self-hosted runner
-   |
-   v
-Ansible
-   |
-   +--> app-1
-   |
-   +--> app-2
-```
+1. Запускает тесты приложения.
+2. Собирает Docker image и публикует его в GHCR.
+3. Обновляет FastAPI Deployment через self-hosted runner.
+4. Проверяет успешность Kubernetes rollout.
 
-Pipeline состоит из трёх этапов.
+Для автоматического деплоя runner должен иметь доступ к Kubernetes API.
 
-### Test
-
-GitHub-hosted runner:
-
-- запускает PostgreSQL service container;
-- устанавливает зависимости;
-- запускает `pytest`;
-- проверяет Docker Compose configuration.
-
-Тесты проверяют:
-
-- `/health`;
-- сохранение пользователя;
-- получение списка пользователей.
-
-При ошибке следующие стадии не запускаются.
-
-### Build
-
-После успешных тестов собирается Docker image и публикуется в:
-
-```text
-ghcr.io/sboevd13/devops-demo-app
-```
-
-Используются tags:
-
-```text
-latest
-<git commit SHA>
-```
-
-Для deployment используется SHA конкретного commit.
-
-### Deploy
-
-Локальные VM находятся в private VMware network и недоступны GitHub-hosted runner.
-
-Поэтому deployment выполняет self-hosted GitHub Actions runner в WSL.
-
-Runner запускает Ansible, который обновляет приложение сначала на `app-1`, затем на `app-2` и выполняет health checks.
-
-Для выпуска новой версии достаточно:
+## Основные команды
 
 ```bash
-git add .
-git commit -m "Update application"
-git push
+# Состояние кластера
+kubectl get nodes -o wide
+
+# Приложение
+kubectl -n devops-demo get pods,svc
+
+# Мониторинг
+kubectl -n monitoring get pods,svc
+
+# Логи FastAPI
+kubectl -n devops-demo logs deployment/devops-demo-app
+
+# Проверка обновления приложения
+kubectl -n devops-demo rollout status deployment/devops-demo-app
+
+# Проверка резервного копирования и восстановления
+./scripts/k8s-dr-test.sh
 ```
 
-## Backup
+PostgreSQL использует PersistentVolumeClaim. Резервные копии создаются Kubernetes CronJob.
 
-На каждой VM Ansible разворачивает:
-
-```text
-/opt/devops-demo-app/scripts/backup.sh
-```
-
-Скрипт создаёт PostgreSQL dump без остановки приложения:
-
-```text
-database.sql.gz
-```
-
-Также сохраняются конфигурация и SHA-256 checksums.
-
-Запуск:
-
-```bash
-cd /opt/devops-demo-app
-./scripts/backup.sh
-```
-
-## Disaster Recovery
-
-В проекте есть автоматизированный cross-host DR test:
-
-```bash
-./scripts/dr-test.sh
-```
-
-Сценарий:
-
-```text
-app-1
-  |
-create unique record
-  |
-backup
-  |
-database.sql.gz
-  |
-restore
-  |
-app-2
-  |
-health check
-  |
-verify restored record
-```
-
-Перед изменением базы `app-2` создаётся safety backup.
-
-Тест считается успешным только если:
-
-- backup создан;
-- база на `app-2` восстановлена;
-- приложение снова healthy;
-- уникальная запись из `app-1` найдена в восстановленной базе.
-
-Успешный результат:
-
-```text
-DISASTER RECOVERY TEST PASSED
-```
-
-## Локальное развёртывание
-
-Для доступа используются локальные DNS-имена через `hosts`:
-
-```text
-192.168.175.130 demo1.test
-192.168.175.133 demo2.test
-```
-
-После deployment:
-
-```text
-https://demo1.test
-https://demo2.test
-```
-
-Для homelab используются self-signed TLS certificates.
-
-## Что реализовано
-
-```text
-FastAPI application             ✓
-PostgreSQL                      ✓
-Docker / Docker Compose         ✓
-Nginx reverse proxy             ✓
-HTTPS                           ✓
-SSH hardening                   ✓
-UFW                             ✓
-Ansible                         ✓
-Ansible roles                   ✓
-Ansible Vault                   ✓
-Infrastructure as Code          ✓
-Automated backup                ✓
-Restore                         ✓
-Cross-host disaster recovery    ✓
-Health checks                   ✓
-Pytest                          ✓
-GitHub Actions                  ✓
-GitHub Container Registry       ✓
-Automatic deployment            ✓
-Deployment to two servers       ✓
-```
-
-## Цель проекта
-
-Проект используется для практического изучения:
-
-- Linux administration;
-- Docker;
-- networking;
-- Infrastructure as Code;
-- configuration management;
-- secrets management;
-- CI/CD;
-- automated deployment;
-- backup;
-- disaster recovery;
-- эксплуатации нескольких серверов.
+**Примечание:** первоначальное развёртывание с двух чистых VM и восстановление из бэкапа требуют дополнительной проверки. Создание Secrets пока выполняется вручную.
